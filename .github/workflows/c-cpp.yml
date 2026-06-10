@@ -2,6 +2,9 @@ name: eBookReaderSwitch CI pipeline
 
 on: [push, pull_request, workflow_dispatch]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
 
@@ -10,13 +13,6 @@ jobs:
 
     steps:
     - run: apt update && apt -y install libfreetype6-dev
-    - name: Install switch portlibs
-      run: |
-        dkp-pacman -Sy --noconfirm
-        dkp-pacman -S --needed --noconfirm \
-          switch-sdl2 switch-sdl2_ttf switch-sdl2_image switch-freetype \
-          switch-libconfig switch-libpng switch-libjpeg-turbo switch-libwebp \
-          switch-zlib switch-bzip2
     - name: Remove preinstalled mupdf (this repo builds its own copy)
       run: |
         rm -rf /opt/devkitpro/portlibs/switch/include/mupdf
