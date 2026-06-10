@@ -59,6 +59,9 @@ ICON := icon.jpg
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
 CFLAGS	:=	-g -std=c++17 -Wall -O2 -ffunction-sections \
+			-Wno-error=implicit-function-declaration \
+			-Wno-error=int-conversion \
+			-Wno-error=incompatible-pointer-types \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	-D__SWITCH__ $(INCLUDE) `sdl2-config --cflags`
