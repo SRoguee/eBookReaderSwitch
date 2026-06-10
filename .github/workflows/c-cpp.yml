@@ -10,22 +10,27 @@ jobs:
 
     steps:
     - run: apt update && apt -y install libfreetype6-dev
-    - uses: actions/checkout@v1
-    - name: Get repo submoduels
+    - name: Install switch portlibs
       run: |
-        git submodule update --init --recursive
+        dkp-pacman -Sy --noconfirm
+        dkp-pacman -S --needed --noconfirm \
+          switch-sdl2 switch-sdl2_ttf switch-sdl2_image switch-freetype \
+          switch-libconfig switch-libpng switch-libjpeg-turbo switch-libwebp \
+          switch-zlib switch-bzip2
+    - uses: actions/checkout@v4
     - name: Cache MuPDF
-      uses: actions/cache@v2
+      uses: actions/cache@v4
       with:
         path: mupdf/build
-        key: ${{ runner.os }}-mupdf-${{ hashFiles('**/mupdf/PKGBUILD') }}
-        
+        key: ${{ runner.os }}-mupdf-${{ hashFiles('Makefile.mupdf') }}
+
     - name: Building eBookReaderSwitch
       run: |
         export NODEBUG=true
+        export PATH=$DEVKITPRO/portlibs/switch/bin:$PATH
         make mupdf && make -j$(nproc)
-        
-    - uses: actions/upload-artifact@master
+
+    - uses: actions/upload-artifact@v4
       with:
         name: eBookReaderSwitch
-        path: eBookReaderSwitch.nro
+        path: '*.nro'
