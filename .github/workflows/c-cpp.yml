@@ -17,6 +17,10 @@ jobs:
           switch-sdl2 switch-sdl2_ttf switch-sdl2_image switch-freetype \
           switch-libconfig switch-libpng switch-libjpeg-turbo switch-libwebp \
           switch-zlib switch-bzip2
+    - name: Remove preinstalled mupdf (this repo builds its own copy)
+      run: |
+        rm -rf /opt/devkitpro/portlibs/switch/include/mupdf
+        rm -f /opt/devkitpro/portlibs/switch/lib/libmupdf*
     - uses: actions/checkout@v4
     - name: Cache MuPDF
       uses: actions/cache@v4
