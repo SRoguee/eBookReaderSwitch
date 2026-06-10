@@ -17,6 +17,10 @@ TOOL_PREFIX ?= aarch64-none-elf-
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
 CFLAGS	:=	-g -O2 -ffunction-sections \
+			-D_GNU_SOURCE \
+			-Wno-error=implicit-function-declaration \
+			-Wno-error=incompatible-pointer-types \
+			-Wno-error=int-conversion \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	-D__SWITCH__ $(INCLUDE) `sdl2-config --cflags`
