@@ -71,13 +71,13 @@ CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions #-DDEBUG=1 -DEXPERIMENTAL=1
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS_REAL = stdc++fs SDL2_ttf SDL2_image png jpeg freetype webp z bz2 config nx mupdf mupdf-third
+LIBS_REAL = stdc++fs SDL2_ttf SDL2_image png jpeg freetype harfbuzz webp z bz2 config nx mupdf mupdf-third
 ## LIBS_REAL += mupdf_core mupdf_thirdparty
 
 ifeq (,$(NODEBUG))
 LIBS_REAL += twili
 endif
-LIBS = $(addprefix -l,$(LIBS_REAL)) $(shell sdl2-config --libs)
+LIBS = -Wl,--start-group $(addprefix -l,$(LIBS_REAL)) -Wl,--end-group $(shell sdl2-config --libs)
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
