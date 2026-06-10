@@ -20,9 +20,19 @@ class PageLayout
     public:
         PageLayout(fz_document *doc, int current_page);
     
+        virtual ~PageLayout()
+        {
+            FreeTextureIfNeeded(&page_texture);
+        }
+    
         int current_page()
         {
             return _current_page;
+        }
+    
+        int page_count()
+        {
+            return pages_count;
         }
     
         virtual void previous_page(int n);

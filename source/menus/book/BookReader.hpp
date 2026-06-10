@@ -35,12 +35,34 @@ class BookReader {
             return _currentPageLayout;
         }
     
+        // True for formats mupdf can re-paginate to any page size (EPUB, FB2, HTML).
+        bool is_reflowable() {
+            return reflowable;
+        }
+    
     private:
         void show_status_bar();
         void switch_current_page_layout(BookPageLayout bookPageLayout, int current_page);
     
+        // Re-paginate a reflowable document so one page exactly fills the
+        // screen in the given orientation, using the current font size.
+        void apply_reflow_layout(BookPageLayout bookPageLayout);
+    
+        // Re-layout for the given orientation while keeping the reading
+        // position. Returns the page number of that position in the new layout.
+        int reflow_to(BookPageLayout bookPageLayout, int current_page);
+    
+        // Change text size of reflowable documents (re-paginates the book).
+        void set_font_size(float size);
+    
+        int load_position();
+        void save_position(int page);
+    
         fz_document *doc = NULL;
         int status_bar_visible_counter = 0;
+    
+        bool reflowable = false;
+        float font_size = 22;
     
         BookPageLayout _currentPageLayout = BookPageLayoutPortrait;
         PageLayout *layout = NULL;
