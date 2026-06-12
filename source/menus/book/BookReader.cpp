@@ -95,8 +95,8 @@ BookReader::BookReader(const char *path, int* result) {
             font_size = fmin(fmax(font_size, (float)MIN_FONT_SIZE), (float)MAX_FONT_SIZE);
 
             page_margin = cfg_get_int("margin", 0);
-            if (page_margin < 0)   page_margin = 0;
-            if (page_margin > 200) page_margin = 200;
+            if (page_margin < -120) page_margin = -120;
+            if (page_margin > 200)  page_margin = 200;
 
             apply_reflow_layout(_currentPageLayout);
         }
@@ -206,6 +206,30 @@ void BookReader::switch_page_layout() {
 #define TM_PANEL_PAD    20
 #define TM_CLOSE        40   // close-button square size
 
+void BookReader::touch_menu_canvas(int *cw, int *ch) {
+    // Portrait reads upright on the 1280x720 framebuffer. Landscape rotates
+    // the page 90 degrees, so its logical (upright-to-the-reader) canvas is
+    // 720x1280 and gets rotated when drawn.
+    if (_currentPageLayout == BookPageLayoutLandscape) {
+        *cw = 720; *ch = 1280;
+    } else {
+        *cw = 1280; *ch = 720;
+    }
+}
+
+void BookReader::touch_menu_map_point(int sx, int sy, int *lx, int *ly) {
+    // Map a physical screen touch (always in 1280x720 space) into the menu's
+    // logical canvas. For landscape we apply the inverse of the 90-degree
+    // rotation used when drawing (verified against the draw transform).
+    if (_currentPageLayout == BookPageLayoutLandscape) {
+        *lx = 720 - sy;
+        *ly = sx;
+    } else {
+        *lx = sx;
+        *ly = sy;
+    }
+}
+
 BookReader::MenuRect BookReader::touch_menu_panel() {
     // Rows stacked under the close button: Light, Dark, Night, Rotate,
     // Reset View, Status Bar, Margin -, Margin +, Exit = 9 rows.
@@ -215,11 +239,13 @@ BookReader::MenuRect BookReader::touch_menu_panel() {
           + rows * TM_BTN_H
           + (rows - 1) * TM_BTN_GAP
           + TM_PANEL_PAD;
+    int cw, ch;
+    touch_menu_canvas(&cw, &ch);
     MenuRect p;
     p.w = TM_PANEL_W;
     p.h = h;
-    p.x = (1280 - p.w) / 2;
-    p.y = (720 - p.h) / 2;
+    p.x = (cw - p.w) / 2;
+    p.y = (ch - p.h) / 2;
     return p;
 }
 
@@ -245,9 +271,32 @@ BookReader::MenuRect BookReader::touch_menu_button(int which) {
     return r;
 }
 
+void BookReader::draw_exiting_overlay() {
+    // Full-screen dim with a centred "Exiting..." label, presented right away.
+    SDL_DrawRect(RENDERER, 0, 0, 1280, 720, SDL_MakeColour(0, 0, 0, 200));
+    const char *msg = "Exiting...";
+    int tw = 0, th = 0;
+    TTF_SizeText(ROBOTO_30, msg, &tw, &th);
+    SDL_DrawText(RENDERER, ROBOTO_30, (1280 - tw) / 2, (720 - th) / 2, WHITE, msg);
+    SDL_RenderPresent(RENDERER);
+}
+
 void BookReader::draw_touch_menu() {
-    // Dimmed backdrop over the whole screen.
-    SDL_DrawRect(RENDERER, 0, 0, 1280, 720, SDL_MakeColour(0, 0, 0, 150));
+    int cw, ch;
+    touch_menu_canvas(&cw, &ch);
+
+    // Render the whole menu upright into an off-screen texture sized to the
+    // logical canvas, then blit it to the screen - rotated 90 degrees in
+    // landscape so the menu is upright to the reader in either orientation.
+    SDL_Texture *target = SDL_CreateTexture(RENDERER, SDL_PIXELFORMAT_RGBA8888,
+                                            SDL_TEXTUREACCESS_TARGET, cw, ch);
+    SDL_SetTextureBlendMode(target, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderTarget(RENDERER, target);
+    SDL_SetRenderDrawColor(RENDERER, 0, 0, 0, 0);
+    SDL_RenderClear(RENDERER);
+
+    // Dimmed backdrop over the whole logical canvas.
+    SDL_DrawRect(RENDERER, 0, 0, cw, ch, SDL_MakeColour(0, 0, 0, 150));
 
     MenuRect p = touch_menu_panel();
     SDL_Color panelColor = configDarkMode ? HINT_COLOUR_DARK : HINT_COLOUR_LIGHT;
@@ -302,23 +351,42 @@ void BookReader::draw_touch_menu() {
     drawBtn(MenuBtnMarginUp,   "Margin +", false);
 
     drawBtn(MenuBtnExit,      "Exit book",        false);
+
+    // Blit the finished menu to the screen.
+    SDL_SetRenderTarget(RENDERER, NULL);
+    if (_currentPageLayout == BookPageLayoutLandscape) {
+        // The logical canvas is 720x1280. Use the texture's native size for
+        // the destination rect (no scaling) centred on the screen, then rotate
+        // 90 degrees about its centre; a 720x1280 rect so placed exactly fills
+        // the 1280x720 screen after rotation.
+        SDL_Rect dst;
+        dst.w = cw;                  // 720
+        dst.h = ch;                  // 1280
+        dst.x = (1280 - dst.w) / 2;  // 280
+        dst.y = (720 - dst.h) / 2;   // -280
+        SDL_RenderCopyEx(RENDERER, target, NULL, &dst, 90, NULL, SDL_FLIP_NONE);
+    } else {
+        SDL_Rect dst = {0, 0, cw, ch};
+        SDL_RenderCopy(RENDERER, target, NULL, &dst);
+    }
+    SDL_DestroyTexture(target);
 }
 
-bool BookReader::handle_touch_menu(int tx, int ty, bool *exitBook) {
+bool BookReader::handle_touch_menu(int sx, int sy, bool *exitBook) {
     if (exitBook) *exitBook = false;
+
+    // Map the physical screen touch into the menu's logical canvas so the
+    // same coordinates work upright in portrait and rotated in landscape.
+    int tx, ty;
+    touch_menu_map_point(sx, sy, &tx, &ty);
 
     if (!showTouchMenu) {
         // Menu closed: open it when the user taps the centre of the screen.
-        // The framebuffer is always 1280x720. In portrait the natural centre
-        // is a vertical strip (centre of X). In landscape the content is
-        // rotated 90 degrees, so the centre as the reader perceives it is a
-        // horizontal band (centre of Y).
-        bool inCentre;
-        if (_currentPageLayout == BookPageLayoutPortrait) {
-            inCentre = (tx >= 500 && tx <= 780);
-        } else {
-            inCentre = (ty >= 260 && ty <= 460);
-        }
+        // In logical space the centre is a vertical strip for both orientations
+        // (the landscape mapping already rotates the coordinates upright).
+        int cw, ch;
+        touch_menu_canvas(&cw, &ch);
+        bool inCentre = (tx >= cw / 2 - 140 && tx <= cw / 2 + 140);
         if (inCentre) {
             showTouchMenu = true;
             return true;
@@ -473,13 +541,16 @@ void BookReader::apply_reflow_layout(BookPageLayout bookPageLayout) {
     float w = (bookPageLayout == BookPageLayoutLandscape) ? windowY : windowX;
     float h = (bookPageLayout == BookPageLayoutLandscape) ? windowX : windowY;
 
-    // Shrink the text area by the margin on every side. The page texture then
-    // renders narrower/shorter than the screen and, being centred, shows as a
-    // margin around the text. Clamp so we never collapse the usable area.
+    // Adjust the text area by the margin on every side. Positive margins
+    // shrink it (visible borders); negative margins enlarge it past the
+    // screen so the document's own body margins fall off-edge and the text
+    // runs close to edge-to-edge. Clamp positive margins so we never collapse
+    // the usable area; negative margins are bounded by set_margin().
     float m = (float)page_margin;
-    if (m * 2 > w - 100) m = (w - 100) / 2;
-    if (m * 2 > h - 100) m = (h - 100) / 2;
-    if (m < 0) m = 0;
+    if (m > 0) {
+        if (m * 2 > w - 100) m = (w - 100) / 2;
+        if (m * 2 > h - 100) m = (h - 100) / 2;
+    }
     w -= m * 2;
     h -= m * 2;
 
@@ -522,14 +593,16 @@ void BookReader::set_font_size(float size) {
 
 void BookReader::set_margin(int margin) {
     // Margins only apply to reflowable documents (EPUB, FB2, HTML), where we
-    // can re-paginate the text into a smaller area. For fixed-layout formats
-    // (PDF, CBZ, XPS) there is nothing to reflow, so this is a no-op.
-    const int MIN_MARGIN = 0;
+    // can re-paginate the text into a different sized area. For fixed-layout
+    // formats (PDF, CBZ, XPS) there is nothing to reflow, so this is a no-op.
+    //
+    // Negative values lay the text into a box LARGER than the screen, which
+    // pushes the document's own built-in body margins off the edges so the
+    // text runs (close to) edge-to-edge.
+    const int MIN_MARGIN = -120;
     const int MAX_MARGIN = 200;
-    const int MARGIN_STEP = 20;
 
     margin = std::min(std::max(margin, MIN_MARGIN), MAX_MARGIN);
-    (void)MARGIN_STEP; // step is applied by the caller
 
     if (!reflowable || margin == page_margin) {
         show_status_bar();
