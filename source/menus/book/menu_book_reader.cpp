@@ -43,14 +43,20 @@ void Menu_OpenBook(char *path) {
 	u64 kUp = padGetButtonsUp(&pad);
 
 	HidTouchScreenState state={0};
-	
+
+	// Only register a touch as a tap when the screen transitions from
+	// "not touched" to "touched". This prevents a single hold from
+	// flipping many pages on consecutive frames.
+	bool newTouch = false;
 	if(hidGetTouchScreenStates(&state, 1)) {
 		if(state.count != prev_touchcount) {
+			if(prev_touchcount == 0 && state.count > 0)
+				newTouch = true;
 			prev_touchcount = state.count;
-		} 
+		}
 	}
 
-	for(s32 i=0; i<state.count; i++) {
+	for(s32 i=0; newTouch && i<state.count; i++) {
 		if (state.touches[i].x > 1000 && (state.touches[i].y > 200 && state.touches[i].y < 500))
 			if (reader->currentPageLayout() == BookPageLayoutPortrait)
 				reader->next_page(1);
