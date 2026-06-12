@@ -57,6 +57,18 @@ void Menu_OpenBook(char *path) {
 	}
 
 	for(s32 i=0; newTouch && i<state.count; i++) {
+		// First give the touch overlay menu a chance to handle this tap.
+		// It opens when the centre strip is tapped, and while open it
+		// captures taps for its buttons. If it consumes the tap, skip the
+		// normal page-turn / zoom touch handling below.
+		bool exitBook = false;
+		if (reader->handle_touch_menu(state.touches[i].x, state.touches[i].y, &exitBook)) {
+			if (exitBook) {
+				result = -1; // leave the reader loop
+			}
+			continue;
+		}
+
 		if (state.touches[i].x > 1000 && (state.touches[i].y > 200 && state.touches[i].y < 500))
 			if (reader->currentPageLayout() == BookPageLayoutPortrait)
 				reader->next_page(1);
@@ -82,13 +94,21 @@ void Menu_OpenBook(char *path) {
 				reader->next_page(1);
 	}
 
-        if (!helpMenu && kDown & HidNpadButton_Left) {
+        // While the touch menu is open, swallow page/zoom button input so
+        // physical buttons don't act on the book underneath. B closes it.
+        if (reader->showTouchMenu) {
+            if (kDown & HidNpadButton_B) {
+                reader->showTouchMenu = false;
+            }
+        }
+
+        if (!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_Left) {
             if (reader->currentPageLayout() == BookPageLayoutPortrait ) {
                 reader->previous_page(1);
             } else if ((reader->currentPageLayout() == BookPageLayoutLandscape) ) {
                 reader->zoom_out();
             }
-        } else if (!helpMenu && kDown & HidNpadButton_Right) {
+        } else if (!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_Right) {
             if (reader->currentPageLayout() == BookPageLayoutPortrait ) {
                 reader->next_page(1);
             } else if ((reader->currentPageLayout() == BookPageLayoutLandscape) ) {
@@ -96,19 +116,19 @@ void Menu_OpenBook(char *path) {
             }
         }
 
-        if (!helpMenu && kDown & HidNpadButton_R) {
+        if (!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_R) {
             reader->next_page(10);
-        } else if (!helpMenu && kDown & HidNpadButton_L) {
+        } else if (!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_L) {
             reader->previous_page(10);
         }
 
-        if (!helpMenu && ((kDown & HidNpadButton_Up) || (kHeld & HidNpadButton_StickRUp))) {
+        if (!helpMenu && !reader->showTouchMenu && ((kDown & HidNpadButton_Up) || (kHeld & HidNpadButton_StickRUp))) {
             if (reader->currentPageLayout() == BookPageLayoutPortrait ) {
                 reader->zoom_in();
             } else if ((reader->currentPageLayout() == BookPageLayoutLandscape) ) {
                 reader->previous_page(1);
             }
-        } else if (!helpMenu && ((kDown & HidNpadButton_Down) || (kHeld & HidNpadButton_StickRDown))) {
+        } else if (!helpMenu && !reader->showTouchMenu && ((kDown & HidNpadButton_Down) || (kHeld & HidNpadButton_StickRDown))) {
             if (reader->currentPageLayout() == BookPageLayoutPortrait ) {
                 reader->zoom_out();
             } else if ((reader->currentPageLayout() == BookPageLayoutLandscape) ) {
@@ -116,59 +136,62 @@ void Menu_OpenBook(char *path) {
             }
         }
 
-        if (!helpMenu && kHeld & HidNpadButton_StickLUp) {
+        if (!helpMenu && !reader->showTouchMenu && kHeld & HidNpadButton_StickLUp) {
             if (reader->currentPageLayout() == BookPageLayoutPortrait ) {
                 reader->move_page_up();
             } else if ((reader->currentPageLayout() == BookPageLayoutLandscape) ) {
                 reader->move_page_right();
             }
-        } else if (!helpMenu && kHeld & HidNpadButton_StickLDown) {
+        } else if (!helpMenu && !reader->showTouchMenu && kHeld & HidNpadButton_StickLDown) {
             if (reader->currentPageLayout() == BookPageLayoutPortrait ) {
                 reader->move_page_down();
             } else if ((reader->currentPageLayout() == BookPageLayoutLandscape) ) {
                 reader->move_page_left();
             }
-        } else if (!helpMenu && kHeld & HidNpadButton_StickLRight) {
+        } else if (!helpMenu && !reader->showTouchMenu && kHeld & HidNpadButton_StickLRight) {
             if ((reader->currentPageLayout() == BookPageLayoutLandscape) ) {
                 reader->move_page_down();
             }
-        } else if (!helpMenu && kHeld & HidNpadButton_StickLLeft) {
+        } else if (!helpMenu && !reader->showTouchMenu && kHeld & HidNpadButton_StickLLeft) {
             if ((reader->currentPageLayout() == BookPageLayoutLandscape) ) {
                 reader->move_page_up();
             }
         }
 
-	if (!helpMenu && kDown & HidNpadButton_LeftSR)
+	if (!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_LeftSR)
 		reader->next_page(10);
-	else if (!helpMenu && kDown & HidNpadButton_LeftSL)
+	else if (!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_LeftSL)
 		reader->previous_page(10);
 
         if (kUp & HidNpadButton_B) {
             if (helpMenu) {
                 helpMenu = !helpMenu;
+            } else if (reader->showTouchMenu) {
+                // The kDown handler already closed the menu; just don't exit.
             } else {
                 break;
             }
         }
 
-        if (!helpMenu && kDown & HidNpadButton_X) {
+        if (!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_X) {
             reader->permStatusBar = !reader->permStatusBar;
         }
             
-        if ((!helpMenu && kDown & HidNpadButton_StickL) || kDown & HidNpadButton_StickR) {
+        if ((!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_StickL) || kDown & HidNpadButton_StickR) {
             reader->reset_page();
         }
         
-        if (!helpMenu && kDown & HidNpadButton_Y) {
+        if (!helpMenu && !reader->showTouchMenu && kDown & HidNpadButton_Y) {
             reader->switch_page_layout();
         }
 
-        if (!helpMenu && kUp & HidNpadButton_Minus) {
-            configDarkMode = !configDarkMode;
+        if (!helpMenu && !reader->showTouchMenu && kUp & HidNpadButton_Minus) {
+            // Cycle Light -> Dark -> Night with the physical theme button.
+            config_cycle_color_mode();
             reader->previous_page(0);
         }
 
-        if (kDown & HidNpadButton_Plus) {
+        if (!reader->showTouchMenu && kDown & HidNpadButton_Plus) {
             helpMenu = !helpMenu;
         }
  
