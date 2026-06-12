@@ -218,15 +218,16 @@ void BookReader::touch_menu_canvas(int *cw, int *ch) {
 }
 
 void BookReader::touch_menu_map_point(int sx, int sy, int *lx, int *ly) {
-    // Map a physical screen touch (always in 1280x720 space) into the menu's
-    // logical canvas. For landscape we apply the inverse of the 90-degree
-    // rotation used when drawing (verified against the draw transform).
+    // Map a physical screen touch into the menu's logical canvas.
+    // Landscape applies the inverse of the 90-degree draw rotation.
+    // Portrait's touch y is reported inverted relative to the framebuffer,
+    // so flip it back here to match where the buttons are drawn.
     if (_currentPageLayout == BookPageLayoutLandscape) {
         *lx = 720 - sy;
         *ly = sx;
     } else {
         *lx = sx;
-        *ly = sy;
+        *ly = 720 - sy;
     }
 }
 
