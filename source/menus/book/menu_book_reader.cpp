@@ -71,6 +71,12 @@ void Menu_OpenBook(char *path) {
 	}
 
 	for(s32 i=0; newTouch && i<state.count; i++) {
+		// If the chapter list is open, it captures all taps.
+		if (reader->showChapters) {
+			reader->handle_chapter_menu(state.touches[i].x, state.touches[i].y);
+			continue;
+		}
+
 		// First give the touch overlay menu a chance to handle this tap.
 		// It opens when the centre strip is tapped, and while open it
 		// captures taps for its buttons. If it consumes the tap, skip the
@@ -111,6 +117,26 @@ void Menu_OpenBook(char *path) {
 			else if (reader->currentPageLayout() == BookPageLayoutLandscape)
 				reader->next_page(1);
 	}
+
+        // While the chapter list is open it captures all button input:
+        // Up/Down move the selection, A jumps to it, B/X closes the list.
+        if (reader->showChapters) {
+            if ((kDown & HidNpadButton_Up) || (kDown & HidNpadButton_StickLUp))
+                reader->chapters_move(-1);
+            else if ((kDown & HidNpadButton_Down) || (kDown & HidNpadButton_StickLDown))
+                reader->chapters_move(1);
+            else if (kDown & HidNpadButton_L)
+                reader->chapters_move(-reader->chapter_page_step());
+            else if (kDown & HidNpadButton_R)
+                reader->chapters_move(reader->chapter_page_step());
+            else if (kDown & HidNpadButton_A)
+                reader->chapters_select();
+            else if ((kDown & HidNpadButton_B) || (kDown & HidNpadButton_X))
+                reader->showChapters = false;
+
+            // Don't fall through to the normal reader controls this frame.
+            continue;
+        }
 
         // While the touch menu is open, swallow page/zoom button input so
         // physical buttons don't act on the book underneath. B closes it.
