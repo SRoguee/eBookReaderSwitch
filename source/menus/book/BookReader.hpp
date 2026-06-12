@@ -51,6 +51,10 @@ class BookReader {
 
         // Returns true if the chapter list is open and consumed this tap.
         bool handle_chapter_menu(int tx, int ty);
+        // Continuous touch feed for drag-scrolling the chapter list. Called
+        // every frame: `touching` is whether a finger is currently down, and
+        // (sx,sy) its position. Handles drag-to-scroll and tap-to-select.
+        void handle_chapter_touch(bool touching, int sx, int sy);
         // D-pad navigation within the chapter list.
         void chapters_move(int delta);
         void chapters_select();
@@ -108,6 +112,12 @@ class BookReader {
         std::vector<Chapter> chapters;
         int  chapter_selected = 0;   // highlighted row
         int  chapter_scroll   = 0;   // first visible row
+        // Drag-to-scroll state.
+        bool chapter_dragging   = false;
+        int  chapter_drag_last  = -1;  // last finger y (logical); -1 = no gesture
+        int  chapter_drag_start = 0;   // finger y where the press began
+        int  chapter_press_idx  = -1;  // row under the initial press (for tap)
+        float chapter_scroll_px = 0;   // sub-row scroll accumulator (pixels)
         void load_chapters();        // populate `chapters` from the outline
         void draw_chapter_menu();
         int  chapter_rows_visible(); // how many rows fit on screen
