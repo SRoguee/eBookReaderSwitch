@@ -306,9 +306,10 @@ void BookReader::draw_touch_menu() {
     // Title.
     SDL_DrawText(RENDERER, ROBOTO_25, p.x + TM_PANEL_PAD, p.y + TM_PANEL_PAD + 4, textColor, "Menu");
 
-    // Close "X" button (drawn as two crossing bars of small squares).
+    // Close "X" button - neutral grey so it clearly means "close this menu",
+    // distinct from the red "Exit book" action below.
     MenuRect c = touch_menu_button(MenuBtnClose);
-    SDL_DrawRect(RENDERER, c.x, c.y, c.w, c.h, SDL_MakeColour(180, 60, 60, 255));
+    SDL_DrawRect(RENDERER, c.x, c.y, c.w, c.h, SDL_MakeColour(90, 90, 90, 255));
     {
         SDL_Color x = WHITE;
         int cx = c.x + c.w / 2, cy = c.y + c.h / 2, s = 11, t = 4;
@@ -350,7 +351,16 @@ void BookReader::draw_touch_menu() {
     drawBtn(MenuBtnMarginDown, marginLabel, false);
     drawBtn(MenuBtnMarginUp,   "Margin +", false);
 
-    drawBtn(MenuBtnExit,      "Exit book",        false);
+    // Exit book: drawn in red with white text so it is clearly the action
+    // that leaves the book (and distinct from the grey close-X above).
+    {
+        MenuRect r = touch_menu_button(MenuBtnExit);
+        SDL_DrawRect(RENDERER, r.x, r.y, r.w, r.h, SDL_MakeColour(180, 60, 60, 255));
+        const char *label = "Exit book";
+        int tw = 0, th = 0;
+        TTF_SizeText(ROBOTO_25, label, &tw, &th);
+        SDL_DrawText(RENDERER, ROBOTO_25, r.x + 18, r.y + (r.h - th) / 2, WHITE, label);
+    }
 
     // Blit the finished menu to the screen.
     SDL_SetRenderTarget(RENDERER, NULL);
@@ -491,17 +501,6 @@ void BookReader::draw(bool drawHelp) {
     
     if (showTouchMenu) {
         draw_touch_menu();
-    } else if (!drawHelp) {
-        // A subtle "tap here for menu" handle at the centre of the screen.
-        // Portrait: a short vertical pill on the centre line.
-        // Landscape: a short horizontal pill on the centre line (content is
-        // rotated 90 degrees, so the perceived centre runs the other way).
-        SDL_Color handle = SDL_MakeColour(128, 128, 128, 120);
-        if (_currentPageLayout == BookPageLayoutPortrait) {
-            SDL_DrawRect(RENDERER, 1280 / 2 - 4, 720 / 2 - 40, 8, 80, handle);
-        } else {
-            SDL_DrawRect(RENDERER, 1280 / 2 - 40, 720 / 2 - 4, 80, 8, handle);
-        }
     }
 
     SDL_RenderPresent(RENDERER);
