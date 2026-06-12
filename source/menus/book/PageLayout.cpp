@@ -49,7 +49,15 @@ void PageLayout::move_right() {
 
 void PageLayout::reset() {
     page_center = fz_make_point(viewport.w / 2, viewport.h / 2);
-    set_zoom(min_zoom);
+    // set_zoom early-returns if the zoom is unchanged, which would skip the
+    // re-render needed to apply the recentred page_center. Force a render so
+    // "reset view" always visibly recentres, even when already at min zoom.
+    if (zoom == min_zoom) {
+        render_page_to_texture(_current_page, false);
+        move_page(0, 0);
+    } else {
+        set_zoom(min_zoom);
+    }
 };
 
 void PageLayout::draw_page() {
