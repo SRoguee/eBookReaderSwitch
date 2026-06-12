@@ -88,8 +88,12 @@ void PageLayout::render_page_to_texture(int num, bool reset_zoom) {
     }
     
     fz_pixmap *pix = fz_new_pixmap_from_page_contents(ctx, page, fz_scale(zoom, zoom), fz_device_rgb(ctx), 0);
-    if (configDarkMode) {
+    if (configColorMode == ColorModeDark) {
         fz_invert_pixmap(ctx, pix);
+    } else if (configColorMode == ColorModeNight) {
+        // Warm "night"/sepia: map the page's black point to a soft dark
+        // brown and the white point to a warm cream so it's easy on the eyes.
+        fz_tint_pixmap(ctx, pix, 0x5B4636, 0xF4ECD8);
     }
 
     SDL_Surface *image = SDL_CreateRGBSurfaceFrom(pix->samples, pix->w, pix->h, pix->n * 8, pix->w * pix->n, 0x000000FF, 0x0000FF00, 0x00FF0000, 0);
