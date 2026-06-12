@@ -13,7 +13,12 @@ LandscapePageLayout::LandscapePageLayout(fz_document *doc, int current_page):Pag
 
 void LandscapePageLayout::reset() {
     page_center = fz_make_point(viewport.h / 2, viewport.w / 2);
-    set_zoom(min_zoom);
+    if (zoom == min_zoom) {
+        render_page_to_texture(_current_page, false);
+        move_page(0, 0);
+    } else {
+        set_zoom(min_zoom);
+    }
 };
 
 void LandscapePageLayout::draw_page() {
