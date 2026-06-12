@@ -42,7 +42,8 @@ struct BookEntry {
     string extention;
     bool   warned;
     SDL_Texture *cover;     // NULL until rendered (or if no cover available)
-    bool   cover_tried;     // true once we've attempted to render the cover
+    bool   cache_checked;   // true once we've tried the fast disk-cache load
+    bool   cover_tried;     // true once we've attempted the full mupdf render
 };
 
 // Build the on-disk cache path for a book's cover thumbnail.
@@ -60,27 +61,25 @@ static string cover_cache_path(const string &fullpath) {
 }
 
 // Render the first page of a document to an SDL texture sized to fit a card.
-// Uses its own mupdf context so it is independent of the reader's global ctx.
-//
-// Covers are cached to disk: the expensive mupdf open+layout+render only
-// happens the first time a book is seen. After that the cached PNG is loaded
-// directly, which is near-instant - this is what keeps the chooser (and so
-// startup and returning from a book) fast.
-static SDL_Texture *render_cover(fz_context *cctx, const char *path) {
+// Fast path: load a previously cached cover PNG from disk. Returns NULL if
+// there is no cache yet (cheap - just a failed file open), so many of these
+// can run per frame without stalling the UI.
+static SDL_Texture *load_cached_cover(const char *path) {
+    string cache = cover_cache_path(path);
+    SDL_Surface *cached = IMG_Load(cache.c_str());
+    if (!cached) return NULL;
+    SDL_Texture *tex = SDL_CreateTextureFromSurface(RENDERER, cached);
+    SDL_FreeSurface(cached);
+    return tex;
+}
+
+// Slow path: render page 0 with mupdf (full EPUB layout) and write the PNG to
+// the disk cache for next time. This is the expensive call - the chooser runs
+// at most one of these per frame so input stays responsive while covers fill
+// in. Uses its own mupdf context, independent of the reader's global ctx.
+static SDL_Texture *render_cover_from_doc(fz_context *cctx, const char *path) {
     SDL_Texture *tex = NULL;
     string cache = cover_cache_path(path);
-
-    // 1) Try the cached PNG first.
-    {
-        SDL_Surface *cached = IMG_Load(cache.c_str());
-        if (cached) {
-            tex = SDL_CreateTextureFromSurface(RENDERER, cached);
-            SDL_FreeSurface(cached);
-            if (tex) return tex;
-        }
-    }
-
-    // 2) Not cached: render it with mupdf, then save the PNG for next time.
     fz_document *doc = NULL;
 
     fz_try(cctx) {
@@ -174,8 +173,9 @@ void Menu_StartChoosing() {
             b.fullpath    = path + "/" + filename;
             b.extention   = extention;
             b.warned      = contains(warnedExtentions, extention);
-            b.cover       = NULL;
-            b.cover_tried = false;
+            b.cover         = NULL;
+            b.cache_checked = false;
+            b.cover_tried   = false;
             books.push_back(b);
         }
     }
@@ -339,17 +339,29 @@ void Menu_StartChoosing() {
             if (readingBook) break;
         }
 
-        // ---- Lazily render covers for on-screen cards ----
-        // Only a couple per frame, so the grid stays responsive while covers
-        // stream in. Off-screen books are never rendered until scrolled to.
-        int coverBudget = 2;
-        for (int i = 0; i < amountOfFiles && coverBudget > 0; i++) {
+        // ---- Fill in covers for on-screen cards ----
+        // First, cheap disk-cache loads for any visible card we haven't checked
+        // yet - these are fast, so do as many as needed this frame. Then at most
+        // ONE expensive mupdf render, so a book that still needs generating
+        // doesn't stall input. Off-screen books are never touched until scrolled
+        // into view.
+        for (int i = 0; i < amountOfFiles; i++) {
             int row = i / CARD_COLS;
             if (row < firstRow || row >= firstRow + visibleRows) continue; // off-screen
-            if (books[i].cover_tried) continue;                            // already done
-            books[i].cover = render_cover(cctx, books[i].fullpath.c_str());
+            if (books[i].cache_checked) continue;
+            books[i].cover = load_cached_cover(books[i].fullpath.c_str());
+            books[i].cache_checked = true;
+            if (books[i].cover) books[i].cover_tried = true; // got it from cache
+        }
+
+        int renderBudget = 1; // at most one heavy render per frame
+        for (int i = 0; i < amountOfFiles && renderBudget > 0; i++) {
+            int row = i / CARD_COLS;
+            if (row < firstRow || row >= firstRow + visibleRows) continue; // off-screen
+            if (books[i].cover_tried) continue;                            // done/cached
+            books[i].cover = render_cover_from_doc(cctx, books[i].fullpath.c_str());
             books[i].cover_tried = true;
-            coverBudget--;
+            renderBudget--;
         }
 
         // ---- Draw the card grid ----
