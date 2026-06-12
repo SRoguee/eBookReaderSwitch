@@ -547,6 +547,18 @@ void BookReader::draw_chapter_menu() {
         int hw = 0, hh = 0;
         TTF_SizeText(ROBOTO_15, hint, &hw, &hh);
         SDL_DrawText(RENDERER, ROBOTO_15, cw - CH_MARGIN - hw - 20, ch - CH_MARGIN - hh - 8, textColor, hint);
+
+        // Scrollbar track + thumb on the right edge of the list area.
+        int total = (int)chapters.size();
+        int trackX = cw - CH_MARGIN - 14;
+        int trackY = CH_MARGIN + CH_HEADER_H;
+        int trackH = vis * CH_ROW_H;
+        SDL_DrawRect(RENDERER, trackX, trackY, 6, trackH, SDL_MakeColour(128, 128, 128, 90));
+        int thumbH = std::max(24, trackH * vis / total);
+        int maxScroll = std::max(1, total - vis);
+        int thumbY = trackY + (trackH - thumbH) * std::min(chapter_scroll, maxScroll) / maxScroll;
+        SDL_DrawRect(RENDERER, trackX, thumbY, 6, thumbH,
+                     configDarkMode ? SELECTOR_COLOUR_DARK : SELECTOR_COLOUR_LIGHT);
     }
 
     if (rotate) {
@@ -583,6 +595,106 @@ int BookReader::chapter_page_step() {
     return s < 1 ? 1 : s;
 }
 
+// Continuous touch handler: supports drag-to-scroll plus tap-to-select.
+// `touching` is whether a finger is down this frame; (sx,sy) its raw screen
+// position. Internally tracks press -> move -> release to tell a tap (select)
+// from a drag (scroll).
+void BookReader::handle_chapter_touch(bool touching, int sx, int sy) {
+    if (!showChapters) {
+        chapter_dragging = false;
+        chapter_press_idx = -1;
+        chapter_drag_last = -1;
+        return;
+    }
+
+    const int DRAG_THRESHOLD = 12; // logical px before a press becomes a drag
+    const int NONE = -1;
+
+    if (touching) {
+        int tx, ty;
+        touch_menu_map_point(sx, sy, &tx, &ty);
+
+        if (chapter_drag_last == NONE) {
+            // ---- Finger just went down: start a gesture. ----
+            chapter_drag_start = ty;
+            chapter_drag_last  = ty;
+            chapter_scroll_px  = 0;
+            chapter_dragging   = false;
+
+            // Record which visible row (if any) is under the initial press.
+            chapter_press_idx = NONE;
+            int cw, ch; touch_menu_canvas(&cw, &ch);
+
+            // Close X: handle immediately on press.
+            int bx = cw - CH_MARGIN - 20 - 40;
+            int by = CH_MARGIN + 12;
+            if (tx >= bx && tx <= bx + 40 && ty >= by && ty <= by + 40) {
+                showChapters = false;
+                return;
+            }
+
+            int vis = chapter_rows_visible();
+            for (int v = 0; v < vis; v++) {
+                int idx = chapter_scroll + v;
+                if (idx >= (int)chapters.size()) break;
+                MenuRect r = chapter_row_rect(v);
+                if (tx >= r.x && tx <= r.x + r.w && ty >= r.y && ty <= r.y + r.h) {
+                    chapter_press_idx = idx;
+                    break;
+                }
+            }
+            // Remember if the press was outside the panel (for tap-to-close).
+            if (tx < CH_MARGIN || tx > cw - CH_MARGIN || ty < CH_MARGIN || ty > ch - CH_MARGIN) {
+                chapter_press_idx = -2; // sentinel: pressed outside the panel
+            }
+            return;
+        }
+
+        // ---- Finger moving: accumulate and scroll by whole rows. ----
+        int dy = ty - chapter_drag_last;
+        chapter_drag_last = ty;
+
+        if (!chapter_dragging && abs(ty - chapter_drag_start) > DRAG_THRESHOLD) {
+            chapter_dragging = true;
+        }
+
+        if (chapter_dragging) {
+            // Finger down-the-screen scrolls the list up (content follows finger).
+            chapter_scroll_px += dy;
+            while (chapter_scroll_px >= CH_ROW_H) { chapter_scroll--; chapter_scroll_px -= CH_ROW_H; }
+            while (chapter_scroll_px <= -CH_ROW_H) { chapter_scroll++; chapter_scroll_px += CH_ROW_H; }
+
+            int vis = chapter_rows_visible();
+            int maxScroll = std::max(0, (int)chapters.size() - vis);
+            if (chapter_scroll < 0)         { chapter_scroll = 0;         chapter_scroll_px = 0; }
+            if (chapter_scroll > maxScroll) { chapter_scroll = maxScroll; chapter_scroll_px = 0; }
+        }
+        return;
+    }
+
+    // ---- Finger released. ----
+    if (chapter_drag_last != NONE) {
+        bool wasDragging = chapter_dragging;
+        int  pressIdx    = chapter_press_idx;
+
+        chapter_dragging  = false;
+        chapter_drag_last = NONE;
+        chapter_press_idx = NONE;
+        chapter_scroll_px = 0;
+
+        if (wasDragging) return;            // a scroll, not a tap
+
+        if (pressIdx == -2) {               // tapped outside the panel
+            showChapters = false;
+        } else if (pressIdx >= 0) {         // tapped a row: select, or jump if already selected
+            if (pressIdx == chapter_selected) chapters_select();
+            else                              chapter_selected = pressIdx;
+        }
+    }
+}
+
+// Discrete tap handler (kept for any direct tap routing): close button, row
+// select/jump, or tap-outside-to-close. Returns true if consumed.
 bool BookReader::handle_chapter_menu(int sx, int sy) {
     if (!showChapters) return false;
 
@@ -592,7 +704,6 @@ bool BookReader::handle_chapter_menu(int sx, int sy) {
     int cw, ch;
     touch_menu_canvas(&cw, &ch);
 
-    // Close X in the header.
     int bx = cw - CH_MARGIN - 20 - 40;
     int by = CH_MARGIN + 12;
     if (tx >= bx && tx <= bx + 40 && ty >= by && ty <= by + 40) {
@@ -600,23 +711,18 @@ bool BookReader::handle_chapter_menu(int sx, int sy) {
         return true;
     }
 
-    // A chapter row: first tap selects, second tap on the same row jumps.
     int vis = chapter_rows_visible();
     for (int v = 0; v < vis; v++) {
         int idx = chapter_scroll + v;
         if (idx >= (int)chapters.size()) break;
         MenuRect r = chapter_row_rect(v);
         if (tx >= r.x && tx <= r.x + r.w && ty >= r.y && ty <= r.y + r.h) {
-            if (idx == chapter_selected) {
-                chapters_select();
-            } else {
-                chapter_selected = idx;
-            }
+            if (idx == chapter_selected) chapters_select();
+            else                          chapter_selected = idx;
             return true;
         }
     }
 
-    // Tap outside the panel closes it.
     if (tx < CH_MARGIN || tx > cw - CH_MARGIN || ty < CH_MARGIN || ty > ch - CH_MARGIN) {
         showChapters = false;
     }
