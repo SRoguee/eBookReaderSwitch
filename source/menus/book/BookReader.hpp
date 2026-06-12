@@ -19,6 +19,9 @@ class BookReader {
 
         bool permStatusBar = false;
 
+        // Touch overlay menu (opened by tapping the centre of the screen).
+        bool showTouchMenu = false;
+
         void previous_page(int n);
         void next_page(int n);
         void zoom_in();
@@ -30,6 +33,12 @@ class BookReader {
         void reset_page();
         void switch_page_layout();
         void draw(bool drawHelp);
+
+        // Handle a screen tap while the book is open. Returns true if the tap
+        // was consumed by the touch menu (so the reader should skip its normal
+        // page-turn / zoom touch handling for this tap). Sets `exitBook` to
+        // true if the user pressed the menu's exit button.
+        bool handle_touch_menu(int tx, int ty, bool *exitBook);
     
         BookPageLayout currentPageLayout() {
             return _currentPageLayout;
@@ -43,6 +52,25 @@ class BookReader {
     private:
         void show_status_bar();
         void switch_current_page_layout(BookPageLayout bookPageLayout, int current_page);
+
+        // ---- Touch overlay menu helpers ----
+        // The menu is a vertical panel of buttons. We compute each button's
+        // rectangle from a shared layout so drawing and hit-testing agree.
+        struct MenuRect { int x, y, w, h; };
+        enum MenuButton {
+            MenuBtnClose = 0,   // the "X"
+            MenuBtnLight,
+            MenuBtnDark,
+            MenuBtnNight,
+            MenuBtnRotate,
+            MenuBtnResetView,
+            MenuBtnStatusBar,
+            MenuBtnExit,
+            MenuBtnCount
+        };
+        MenuRect touch_menu_panel();
+        MenuRect touch_menu_button(int which);
+        void draw_touch_menu();
     
         // Re-paginate a reflowable document so one page exactly fills the
         // screen in the given orientation, using the current font size.
