@@ -34,6 +34,10 @@ class BookReader {
         void switch_page_layout();
         void draw(bool drawHelp);
 
+        // Draw an immediate "Exiting..." splash and present it, so leaving a
+        // book gives instant feedback before the chooser reloads.
+        void draw_exiting_overlay();
+
         // Handle a screen tap while the book is open. Returns true if the tap
         // was consumed by the touch menu (so the reader should skip its normal
         // page-turn / zoom touch handling for this tap). Sets `exitBook` to
@@ -73,6 +77,14 @@ class BookReader {
         MenuRect touch_menu_panel();
         MenuRect touch_menu_button(int which);
         void draw_touch_menu();
+
+        // The menu is laid out in a logical space matching the reading
+        // orientation (portrait => 1280x720 upright; landscape => 720x1280,
+        // then rotated 90 degrees on screen). These give the logical canvas
+        // size and map a physical screen touch into that logical space so
+        // hit-testing and drawing always agree.
+        void touch_menu_canvas(int *cw, int *ch);
+        void touch_menu_map_point(int sx, int sy, int *lx, int *ly);
     
         // Re-paginate a reflowable document so one page exactly fills the
         // screen in the given orientation, using the current font size.
