@@ -154,6 +154,11 @@ void Menu_StartChoosing() {
     PadState pad;
     padInitializeDefault(&pad);
 
+    // Touch support: tap a card to select it, tap the selected card again to
+    // open it (two-step avoids accidental opens on a touchscreen).
+    hidInitializeTouchScreen();
+    s32 prevTouchCount = 0;
+
     while(appletMainLoop()) {
         if (readingBook) {
             break;
@@ -234,6 +239,62 @@ void Menu_StartChoosing() {
         }
         if (firstRow > max(0, totalRows - visibleRows)) {
             firstRow = max(0, totalRows - visibleRows);
+        }
+
+        // ---- Touch input: select a card by tapping it; tap the already-
+        // selected card again to open it. ----
+        {
+            HidTouchScreenState ts = {0};
+            bool newTouch = false;
+            int tx = 0, ty = 0;
+            if (hidGetTouchScreenStates(&ts, 1)) {
+                if (ts.count != prevTouchCount) {
+                    if (prevTouchCount == 0 && ts.count > 0) {
+                        newTouch = true;
+                        tx = ts.touches[0].x;
+                        ty = ts.touches[0].y;
+                    }
+                    prevTouchCount = ts.count;
+                }
+            }
+
+            if (newTouch && !isWarningOnScreen && amountOfFiles > 0) {
+                for (int i = 0; i < amountOfFiles; i++) {
+                    int row = i / CARD_COLS;
+                    int col = i % CARD_COLS;
+                    if (row < firstRow || row >= firstRow + visibleRows) continue;
+
+                    int x = GRID_LEFT + col * (CARD_W + CARD_GAP_X);
+                    int y = GRID_TOP + (row - firstRow) * rowStride;
+
+                    // Hit area covers the cover image plus its label.
+                    if (tx >= x && tx <= x + CARD_W &&
+                        ty >= y && ty <= y + CARD_H + CARD_LABEL_H) {
+                        if (i == choosenIndex) {
+                            // Second tap on the selected card -> open it.
+                            BookEntry &chosen = books[i];
+                            if (chosen.warned) {
+                                isWarningOnScreen = true;
+                            } else {
+                                cout << "Opening book: " << chosen.fullpath << endl;
+                                Menu_OpenBook((char*) chosen.fullpath.c_str());
+                                readingBook = true;
+                            }
+                        } else {
+                            choosenIndex = i; // first tap just selects
+                        }
+                        break;
+                    }
+                }
+            } else if (newTouch && isWarningOnScreen) {
+                // Tapping while the warning is up confirms opening the book.
+                BookEntry &chosen = books[choosenIndex];
+                cout << "Opening book: " << chosen.fullpath << endl;
+                Menu_OpenBook((char*) chosen.fullpath.c_str());
+                readingBook = true;
+            }
+
+            if (readingBook) break;
         }
 
         // ---- Lazily render covers for on-screen cards ----
