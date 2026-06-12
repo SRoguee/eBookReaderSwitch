@@ -26,6 +26,18 @@ SDL_Window* WINDOW;
 SDL_Event EVENT;
 TTF_Font *ROBOTO_35, *ROBOTO_30, *ROBOTO_27, *ROBOTO_25, *ROBOTO_20, *ROBOTO_15;
 bool configDarkMode;
+int  configColorMode = ColorModeDark;
+
+// Keep the legacy configDarkMode flag in sync with the colour mode.
+// The UI uses "dark styling" for both Dark and Night modes.
+extern "C" int config_is_dark_ui(void) {
+    return (configColorMode != ColorModeLight) ? 1 : 0;
+}
+
+extern "C" void config_cycle_color_mode(void) {
+    configColorMode = (configColorMode + 1) % 3; // light -> dark -> night -> light
+    configDarkMode = config_is_dark_ui();
+}
 
 void Term_Services() {
     std::cout << "Terminate Serices" << std::endl;
@@ -120,7 +132,8 @@ void Init_Services() {
     FS_RecursiveMakeDir("/switch/eBookReader/books");
     std::cout << "Created book directory if needed" << std::endl;
 
-    configDarkMode = true;
+    configColorMode = ColorModeDark;
+    configDarkMode = config_is_dark_ui();
 }
 
 int main(int argc, char *argv[]) {
