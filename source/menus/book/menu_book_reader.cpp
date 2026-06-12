@@ -13,6 +13,20 @@ void Menu_OpenBook(char *path) {
     BookReader *reader = NULL;
     int result = 0;
 
+    // The book open (especially EPUB pagination) can take a moment, so show a
+    // "Loading..." splash first instead of leaving the screen frozen.
+    {
+        SDL_Color back = configDarkMode ? BACK_BLACK : BACK_WHITE;
+        SDL_Color text = configDarkMode ? WHITE : BLACK;
+        SDL_ClearScreen(RENDERER, back);
+        SDL_RenderClear(RENDERER);
+        const char *msg = "Loading...";
+        int tw = 0, th = 0;
+        TTF_SizeText(ROBOTO_30, msg, &tw, &th);
+        SDL_DrawText(RENDERER, ROBOTO_30, (1280 - tw) / 2, (720 - th) / 2, text, msg);
+        SDL_RenderPresent(RENDERER);
+    }
+
     reader = new BookReader(path, &result);
     
     if(result < 0){
@@ -64,7 +78,11 @@ void Menu_OpenBook(char *path) {
 		bool exitBook = false;
 		if (reader->handle_touch_menu(state.touches[i].x, state.touches[i].y, &exitBook)) {
 			if (exitBook) {
-				result = -1; // leave the reader loop
+				// Give immediate visual feedback, then leave. Without this the
+				// exit can feel laggy because the chooser has to re-scan books.
+				reader->draw_exiting_overlay();
+				result = -1;   // leave the reader loop
+				break;         // stop processing further touches this frame
 			}
 			continue;
 		}
