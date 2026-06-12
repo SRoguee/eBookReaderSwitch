@@ -70,10 +70,20 @@ void Menu_OpenBook(char *path) {
 		}
 	}
 
+	// While the chapter list is open it owns all touch input. Feed it the
+	// continuous finger state every frame so it can drag-scroll (and still
+	// tap-to-select). This runs whether or not it's a new tap, so motion and
+	// release are seen too.
+	if (reader->showChapters) {
+		bool touching = (state.count > 0);
+		int fx = touching ? state.touches[0].x : 0;
+		int fy = touching ? state.touches[0].y : 0;
+		reader->handle_chapter_touch(touching, fx, fy);
+	}
+
 	for(s32 i=0; newTouch && i<state.count; i++) {
-		// If the chapter list is open, it captures all taps.
+		// The chapter list consumes touches via handle_chapter_touch above.
 		if (reader->showChapters) {
-			reader->handle_chapter_menu(state.touches[i].x, state.touches[i].y);
 			continue;
 		}
 
