@@ -85,7 +85,11 @@ void Init_Services() {
     timeInitialize();
     std::cout << "Initalized Time" << std::endl;
 
-    if (SDL_CreateWindowAndRenderer(1280, 720, 0, &WINDOW, &RENDERER) == -1)  {
+    // PRESENTVSYNC caps presentation to the display's refresh rate (~60fps).
+    // Without it the reader loop spins as fast as possible, redrawing the same
+    // static page thousands of times a second - pegging the GPU and draining
+    // the battery. Vsync also removes tearing.
+    if (SDL_CreateWindowAndRenderer(1280, 720, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC, &WINDOW, &RENDERER) == -1)  {
         SDL_Log("SDL_CreateWindowAndRenderer: %s\n", SDL_GetError());
         Term_Services();
     }
