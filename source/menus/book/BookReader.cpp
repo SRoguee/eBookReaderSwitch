@@ -285,15 +285,20 @@ void BookReader::draw_touch_menu() {
     int cw, ch;
     touch_menu_canvas(&cw, &ch);
 
-    // Render the whole menu upright into an off-screen texture sized to the
-    // logical canvas, then blit it to the screen - rotated 90 degrees in
-    // landscape so the menu is upright to the reader in either orientation.
-    SDL_Texture *target = SDL_CreateTexture(RENDERER, SDL_PIXELFORMAT_RGBA8888,
-                                            SDL_TEXTUREACCESS_TARGET, cw, ch);
-    SDL_SetTextureBlendMode(target, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderTarget(RENDERER, target);
-    SDL_SetRenderDrawColor(RENDERER, 0, 0, 0, 0);
-    SDL_RenderClear(RENDERER);
+    // Portrait needs no rotation, so draw the menu straight to the screen.
+    // This avoids a render-to-texture round trip (and any backend Y-flip
+    // quirks that come with it). Only landscape uses the rotated path.
+    bool rotate = (_currentPageLayout == BookPageLayoutLandscape);
+
+    SDL_Texture *target = NULL;
+    if (rotate) {
+        target = SDL_CreateTexture(RENDERER, SDL_PIXELFORMAT_RGBA8888,
+                                   SDL_TEXTUREACCESS_TARGET, cw, ch);
+        SDL_SetTextureBlendMode(target, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderTarget(RENDERER, target);
+        SDL_SetRenderDrawColor(RENDERER, 0, 0, 0, 0);
+        SDL_RenderClear(RENDERER);
+    }
 
     // Dimmed backdrop over the whole logical canvas.
     SDL_DrawRect(RENDERER, 0, 0, cw, ch, SDL_MakeColour(0, 0, 0, 150));
@@ -363,8 +368,8 @@ void BookReader::draw_touch_menu() {
     }
 
     // Blit the finished menu to the screen.
-    SDL_SetRenderTarget(RENDERER, NULL);
-    if (_currentPageLayout == BookPageLayoutLandscape) {
+    if (rotate) {
+        SDL_SetRenderTarget(RENDERER, NULL);
         // The logical canvas is 720x1280. Use the texture's native size for
         // the destination rect (no scaling) centred on the screen, then rotate
         // 90 degrees about its centre; a 720x1280 rect so placed exactly fills
@@ -375,11 +380,8 @@ void BookReader::draw_touch_menu() {
         dst.x = (1280 - dst.w) / 2;  // 280
         dst.y = (720 - dst.h) / 2;   // -280
         SDL_RenderCopyEx(RENDERER, target, NULL, &dst, 90, NULL, SDL_FLIP_NONE);
-    } else {
-        SDL_Rect dst = {0, 0, cw, ch};
-        SDL_RenderCopy(RENDERER, target, NULL, &dst);
+        SDL_DestroyTexture(target);
     }
-    SDL_DestroyTexture(target);
 }
 
 bool BookReader::handle_touch_menu(int sx, int sy, bool *exitBook) {
