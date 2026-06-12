@@ -5,6 +5,7 @@ extern "C" {
     #include "common.h"
     #include "textures.h"
     #include "config.h"
+    #include "fs.h"
 }
 
 #include <switch.h>
@@ -44,10 +45,42 @@ struct BookEntry {
     bool   cover_tried;     // true once we've attempted to render the cover
 };
 
+// Build the on-disk cache path for a book's cover thumbnail.
+static string cover_cache_path(const string &fullpath) {
+    string name = fullpath;
+    size_t slash = name.find_last_of("/\\");
+    if (slash != string::npos) name = name.substr(slash + 1);
+    // Replace characters that don't belong in a filename.
+    for (char &ch : name) {
+        if (ch == ' ' || ch == '/' || ch == '\\' || ch == ':' ||
+            ch == '?' || ch == '*' || ch == '"' || ch == '<' || ch == '>' || ch == '|')
+            ch = '_';
+    }
+    return "/switch/eBookReader/covers/" + name + ".png";
+}
+
 // Render the first page of a document to an SDL texture sized to fit a card.
 // Uses its own mupdf context so it is independent of the reader's global ctx.
+//
+// Covers are cached to disk: the expensive mupdf open+layout+render only
+// happens the first time a book is seen. After that the cached PNG is loaded
+// directly, which is near-instant - this is what keeps the chooser (and so
+// startup and returning from a book) fast.
 static SDL_Texture *render_cover(fz_context *cctx, const char *path) {
     SDL_Texture *tex = NULL;
+    string cache = cover_cache_path(path);
+
+    // 1) Try the cached PNG first.
+    {
+        SDL_Surface *cached = IMG_Load(cache.c_str());
+        if (cached) {
+            tex = SDL_CreateTextureFromSurface(RENDERER, cached);
+            SDL_FreeSurface(cached);
+            if (tex) return tex;
+        }
+    }
+
+    // 2) Not cached: render it with mupdf, then save the PNG for next time.
     fz_document *doc = NULL;
 
     fz_try(cctx) {
@@ -72,6 +105,11 @@ static SDL_Texture *render_cover(fz_context *cctx, const char *path) {
 
             fz_pixmap *pix = fz_new_pixmap_from_page_contents(
                 cctx, page, fz_scale(scale, scale), fz_device_rgb(cctx), 0);
+
+            // Save to the disk cache (best-effort; ignore failures).
+            fz_try(cctx) {
+                fz_save_pixmap_as_png(cctx, pix, cache.c_str());
+            } fz_catch(cctx) { }
 
             SDL_Surface *image = SDL_CreateRGBSurfaceFrom(
                 pix->samples, pix->w, pix->h, pix->n * 8, pix->w * pix->n,
@@ -112,6 +150,10 @@ void Menu_StartChoosing() {
     list<string> warnedExtentions = {".epub", ".cbz", ".xps"};
 
     string path = "/switch/eBookReader/books";
+
+    // Ensure the cover cache directory exists (covers are cached as PNGs so
+    // they only have to be rendered once, keeping the chooser fast).
+    FS_RecursiveMakeDir("/switch/eBookReader/covers");
 
     // ---- Build the book list (fast: just a directory scan). ----
     // Covers are rendered lazily inside the main loop so the menu appears
