@@ -479,24 +479,45 @@ void BookReader::draw(bool drawHelp) {
             snprintf(reflow_info, sizeof(reflow_info), "%i/%i, %ipt", layout->current_page() + 1, layout->page_count(), (int)font_size);
             title = reflow_info;
         }
-        
-        int title_width = 0, title_height = 0;
-        TTF_SizeText(ROBOTO_15, title, &title_width, &title_height);
-        
-        SDL_Color color = configDarkMode ? STATUS_BAR_DARK : STATUS_BAR_LIGHT;
-        
-        if (_currentPageLayout == BookPageLayoutPortrait) {
-            SDL_DrawRect(RENDERER, 0, 0, 1280, 45, SDL_MakeColour(color.r, color.g, color.b , 180));
-            SDL_DrawText(RENDERER, ROBOTO_25, (1280 - title_width) / 2, (40 - title_height) / 2, WHITE, title);
-            
-            StatusBar_DisplayTime(false);
-        } else if (_currentPageLayout == BookPageLayoutLandscape) {
-            SDL_DrawRect(RENDERER, 1280 - 45, 0, 45, 720, SDL_MakeColour(color.r, color.g, color.b , 180));
-            int x = (1280 - title_width) - ((40 - title_height) / 2);
-            int y = (720 - title_height) / 2;
-            SDL_DrawRotatedText(RENDERER, ROBOTO_25, (double) 90, x, y, WHITE, title);
 
-            StatusBar_DisplayTime(true);
+        int title_width = 0, title_height = 0;
+
+        // Fade out over the last ~30 frames so the bar eases away instead of
+        // snapping off. When pinned on (permStatusBar) it stays fully opaque.
+        float fade = 1.0f;
+        if (!permStatusBar && status_bar_visible_counter < 30) {
+            fade = status_bar_visible_counter / 30.0f;
+            if (fade < 0) fade = 0;
+        }
+
+        SDL_Color color = configDarkMode ? STATUS_BAR_DARK : STATUS_BAR_LIGHT;
+        Uint8 barAlpha  = (Uint8)(110 * fade);  // was a solid 180 band
+        Uint8 textAlpha = (Uint8)(255 * fade);
+
+        // Slim 26px bar for the brief page-turn flash; keep the original
+        // 45px height when pinned so the clock/battery/help fit properly.
+        const int BAR_H = permStatusBar ? 45 : 26;
+        TTF_Font *barFont = permStatusBar ? ROBOTO_25 : ROBOTO_15;
+        TTF_SizeText(barFont, title, &title_width, &title_height);
+
+        if (_currentPageLayout == BookPageLayoutPortrait) {
+            SDL_DrawRect(RENDERER, 0, 0, 1280, BAR_H, SDL_MakeColour(color.r, color.g, color.b, barAlpha));
+            int ty = (BAR_H - title_height) / 2;
+            SDL_Color tcol = SDL_MakeColour(255, 255, 255, textAlpha);
+            SDL_DrawText(RENDERER, barFont, (1280 - title_width) / 2, ty, tcol, title);
+
+            // Clock/battery/help only when the bar is pinned on - they're
+            // sized for a taller bar and would clutter the brief page-turn
+            // flash, which only needs the page number.
+            if (permStatusBar) StatusBar_DisplayTime(false);
+        } else if (_currentPageLayout == BookPageLayoutLandscape) {
+            SDL_DrawRect(RENDERER, 1280 - BAR_H, 0, BAR_H, 720, SDL_MakeColour(color.r, color.g, color.b, barAlpha));
+            int x = (1280 - title_height) - ((BAR_H - title_height) / 2);
+            int y = (720 - title_width) / 2;
+            SDL_Color tcol = SDL_MakeColour(255, 255, 255, textAlpha);
+            SDL_DrawRotatedText(RENDERER, barFont, (double) 90, x, y, tcol, title);
+
+            if (permStatusBar) StatusBar_DisplayTime(true);
         }
     }
     
@@ -509,7 +530,8 @@ void BookReader::draw(bool drawHelp) {
 }
 
 void BookReader::show_status_bar() {
-    status_bar_visible_counter = 200;
+    // ~90 frames total: visible briefly then a short fade-out (see draw()).
+    status_bar_visible_counter = 90;
 }
 
 void BookReader::switch_current_page_layout(BookPageLayout bookPageLayout, int current_page) {
