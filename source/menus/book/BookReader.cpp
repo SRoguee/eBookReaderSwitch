@@ -2,6 +2,7 @@
 #include "PageLayout.hpp"
 #include "LandscapePageLayout.hpp"
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <stdio.h>
 #include <math.h>
@@ -110,6 +111,9 @@ BookReader::BookReader(const char *path, int* result) {
         if (current_page > 0) {
             show_status_bar();
         }
+
+        // Load the table of contents (chapter list), if the document has one.
+        load_chapters();
     }
     fz_catch(ctx){
         std::cout << "fz_catch reached, closing gracefully" << std::endl;
@@ -134,6 +138,55 @@ void BookReader::next_page(int n) {
     layout->next_page(n);
     show_status_bar();
     save_position(layout->current_page());
+}
+
+void BookReader::goto_page(int page) {
+    // Jump to an absolute page by moving the right number of pages from the
+    // current one. render_page_to_texture clamps to a valid range internally.
+    int delta = page - layout->current_page();
+    if (delta > 0)      layout->next_page(delta);
+    else if (delta < 0) layout->previous_page(-delta);
+    show_status_bar();
+    save_position(layout->current_page());
+}
+
+bool BookReader::has_chapters() {
+    return !chapters.empty();
+}
+
+// Recursively flatten the outline tree (depth-first) into a flat list, with a
+// little indentation per nesting level so sub-chapters read as nested.
+static void flatten_outline(fz_outline *node, int depth, std::vector<BookReader::Chapter> &out) {
+    for (; node != NULL; node = node->next) {
+        if (node->title != NULL) {
+            std::string indent(depth * 2, ' ');
+            BookReader::Chapter c;
+            c.title = indent + node->title;
+            c.page  = node->page >= 0 ? node->page : 0;
+            out.push_back(c);
+        }
+        if (node->down != NULL) {
+            flatten_outline(node->down, depth + 1, out);
+        }
+    }
+}
+
+void BookReader::load_chapters() {
+    chapters.clear();
+
+    fz_outline *outline = NULL;
+    fz_try(ctx) {
+        outline = fz_load_outline(ctx, doc);
+        if (outline != NULL) {
+            flatten_outline(outline, 0, chapters);
+        }
+    }
+    fz_always(ctx) {
+        if (outline != NULL) fz_drop_outline(ctx, outline);
+    }
+    fz_catch(ctx) {
+        chapters.clear();
+    }
 }
 
 void BookReader::zoom_in() {
@@ -219,22 +272,22 @@ void BookReader::touch_menu_canvas(int *cw, int *ch) {
 
 void BookReader::touch_menu_map_point(int sx, int sy, int *lx, int *ly) {
     // Map a physical screen touch into the menu's logical canvas.
-    // Landscape applies the inverse of the 90-degree draw rotation.
-    // Portrait's touch y is reported inverted relative to the framebuffer,
-    // so flip it back here to match where the buttons are drawn.
+    // Landscape: inverse of the 90-degree draw rotation. The button axis is
+    // ly, so it must be 1280 - sx (not sx) or the buttons come out reversed.
+    // Portrait: identity - the framebuffer and logical canvas already agree.
     if (_currentPageLayout == BookPageLayoutLandscape) {
-        *lx = 720 - sy;
-        *ly = sx;
+        *lx = sy;
+        *ly = 1280 - sx;
     } else {
         *lx = sx;
-        *ly = 720 - sy;
+        *ly = sy;
     }
 }
 
 BookReader::MenuRect BookReader::touch_menu_panel() {
     // Rows stacked under the close button: Light, Dark, Night, Rotate,
-    // Reset View, Status Bar, Margin -, Margin +, Exit = 9 rows.
-    int rows = 9;
+    // Reset View, Status Bar, Margin -, Margin +, Chapters, Exit = 10 rows.
+    int rows = 10;
     int h = TM_PANEL_PAD
           + TM_CLOSE + TM_BTN_GAP
           + rows * TM_BTN_H
@@ -357,6 +410,9 @@ void BookReader::draw_touch_menu() {
     drawBtn(MenuBtnMarginDown, marginLabel, false);
     drawBtn(MenuBtnMarginUp,   "Margin +", false);
 
+    // Chapters: greyed-looking label when the book has no table of contents.
+    drawBtn(MenuBtnChapters, has_chapters() ? "Chapters" : "Chapters (none)", false);
+
     // Exit book: drawn in red with white text so it is clearly the action
     // that leaves the book (and distinct from the grey close-X above).
     {
@@ -383,6 +439,188 @@ void BookReader::draw_touch_menu() {
         SDL_RenderCopyEx(RENDERER, target, NULL, &dst, 90, NULL, SDL_FLIP_NONE);
         SDL_DestroyTexture(target);
     }
+}
+
+// ---- Chapter list overlay ----------------------------------------------
+// Geometry is computed in the same logical canvas as the touch menu, so the
+// same rotate-and-blit path keeps it upright in both orientations.
+
+#define CH_MARGIN     40   // gap from canvas edges to the list panel
+#define CH_ROW_H      54
+#define CH_HEADER_H   64   // title + close area at the top
+
+int BookReader::chapter_rows_visible() {
+    int cw, ch;
+    touch_menu_canvas(&cw, &ch);
+    int listH = ch - 2 * CH_MARGIN - CH_HEADER_H;
+    int rows = listH / CH_ROW_H;
+    if (rows < 1) rows = 1;
+    return rows;
+}
+
+BookReader::MenuRect BookReader::chapter_row_rect(int visible_index) {
+    int cw, ch;
+    touch_menu_canvas(&cw, &ch);
+    MenuRect r;
+    r.x = CH_MARGIN + 10;
+    r.w = cw - 2 * (CH_MARGIN + 10);
+    r.y = CH_MARGIN + CH_HEADER_H + visible_index * CH_ROW_H;
+    r.h = CH_ROW_H;
+    return r;
+}
+
+void BookReader::draw_chapter_menu() {
+    int cw, ch;
+    touch_menu_canvas(&cw, &ch);
+    bool rotate = (_currentPageLayout == BookPageLayoutLandscape);
+
+    SDL_Texture *target = NULL;
+    if (rotate) {
+        target = SDL_CreateTexture(RENDERER, SDL_PIXELFORMAT_RGBA8888,
+                                   SDL_TEXTUREACCESS_TARGET, cw, ch);
+        SDL_SetTextureBlendMode(target, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderTarget(RENDERER, target);
+        SDL_SetRenderDrawColor(RENDERER, 0, 0, 0, 0);
+        SDL_RenderClear(RENDERER);
+    }
+
+    SDL_Color panelColor = configDarkMode ? HINT_COLOUR_DARK : HINT_COLOUR_LIGHT;
+    SDL_Color textColor  = configDarkMode ? WHITE : BLACK;
+
+    // Full-canvas panel.
+    SDL_DrawRect(RENDERER, 0, 0, cw, ch, SDL_MakeColour(0, 0, 0, 170));
+    SDL_DrawRect(RENDERER, CH_MARGIN, CH_MARGIN, cw - 2 * CH_MARGIN, ch - 2 * CH_MARGIN, panelColor);
+
+    // Header: title + grey close X.
+    SDL_DrawText(RENDERER, ROBOTO_30, CH_MARGIN + 20, CH_MARGIN + 14, textColor, "Chapters");
+    {
+        int bx = cw - CH_MARGIN - 20 - 40;
+        int by = CH_MARGIN + 12;
+        SDL_DrawRect(RENDERER, bx, by, 40, 40, SDL_MakeColour(90, 90, 90, 255));
+        SDL_Color x = WHITE;
+        int ccx = bx + 20, ccy = by + 20, s = 10, t = 4;
+        for (int i = -s; i <= s; i++) {
+            SDL_DrawRect(RENDERER, ccx + i - t / 2, ccy + i - t / 2, t, t, x);
+            SDL_DrawRect(RENDERER, ccx + i - t / 2, ccy - i - t / 2, t, t, x);
+        }
+    }
+
+    int vis = chapter_rows_visible();
+    if (chapter_scroll < 0) chapter_scroll = 0;
+    if (chapter_scroll > (int)chapters.size() - vis)
+        chapter_scroll = std::max(0, (int)chapters.size() - vis);
+
+    for (int v = 0; v < vis; v++) {
+        int idx = chapter_scroll + v;
+        if (idx >= (int)chapters.size()) break;
+        MenuRect r = chapter_row_rect(v);
+
+        if (idx == chapter_selected) {
+            SDL_DrawRect(RENDERER, r.x, r.y, r.w, r.h,
+                         configDarkMode ? SELECTOR_COLOUR_DARK : SELECTOR_COLOUR_LIGHT);
+        }
+
+        // Title (truncated to fit), with page number on the right.
+        char line[96];
+        snprintf(line, sizeof(line), "%s", chapters[idx].title.c_str());
+        // Rough truncation so long titles don't overrun the page number.
+        int maxChars = (r.w - 90) / 12;
+        if (maxChars > 0 && (int)strlen(line) > maxChars) {
+            line[maxChars] = '\0';
+        }
+        SDL_DrawText(RENDERER, ROBOTO_25, r.x + 12, r.y + (r.h - 28) / 2, textColor, line);
+
+        char pg[16];
+        snprintf(pg, sizeof(pg), "p.%d", chapters[idx].page + 1);
+        int pw = 0, ph = 0;
+        TTF_SizeText(ROBOTO_20, pg, &pw, &ph);
+        SDL_DrawText(RENDERER, ROBOTO_20, r.x + r.w - pw - 12, r.y + (r.h - ph) / 2, textColor, pg);
+    }
+
+    // Scroll hint if there are more chapters than fit.
+    if ((int)chapters.size() > vis) {
+        char hint[48];
+        snprintf(hint, sizeof(hint), "%d-%d / %d",
+                 chapter_scroll + 1,
+                 std::min((int)chapters.size(), chapter_scroll + vis),
+                 (int)chapters.size());
+        int hw = 0, hh = 0;
+        TTF_SizeText(ROBOTO_15, hint, &hw, &hh);
+        SDL_DrawText(RENDERER, ROBOTO_15, cw - CH_MARGIN - hw - 20, ch - CH_MARGIN - hh - 8, textColor, hint);
+    }
+
+    if (rotate) {
+        SDL_SetRenderTarget(RENDERER, NULL);
+        SDL_Rect dst;
+        dst.w = cw; dst.h = ch;
+        dst.x = (1280 - dst.w) / 2;
+        dst.y = (720 - dst.h) / 2;
+        SDL_RenderCopyEx(RENDERER, target, NULL, &dst, 90, NULL, SDL_FLIP_NONE);
+        SDL_DestroyTexture(target);
+    }
+}
+
+void BookReader::chapters_move(int delta) {
+    if (chapters.empty()) return;
+    chapter_selected += delta;
+    if (chapter_selected < 0) chapter_selected = 0;
+    if (chapter_selected >= (int)chapters.size()) chapter_selected = chapters.size() - 1;
+
+    // Keep the selection visible.
+    int vis = chapter_rows_visible();
+    if (chapter_selected < chapter_scroll) chapter_scroll = chapter_selected;
+    if (chapter_selected >= chapter_scroll + vis) chapter_scroll = chapter_selected - vis + 1;
+}
+
+void BookReader::chapters_select() {
+    if (chapters.empty()) return;
+    goto_page(chapters[chapter_selected].page);
+    showChapters = false;
+}
+
+int BookReader::chapter_page_step() {
+    int s = chapter_rows_visible() - 1;
+    return s < 1 ? 1 : s;
+}
+
+bool BookReader::handle_chapter_menu(int sx, int sy) {
+    if (!showChapters) return false;
+
+    int tx, ty;
+    touch_menu_map_point(sx, sy, &tx, &ty);
+
+    int cw, ch;
+    touch_menu_canvas(&cw, &ch);
+
+    // Close X in the header.
+    int bx = cw - CH_MARGIN - 20 - 40;
+    int by = CH_MARGIN + 12;
+    if (tx >= bx && tx <= bx + 40 && ty >= by && ty <= by + 40) {
+        showChapters = false;
+        return true;
+    }
+
+    // A chapter row: first tap selects, second tap on the same row jumps.
+    int vis = chapter_rows_visible();
+    for (int v = 0; v < vis; v++) {
+        int idx = chapter_scroll + v;
+        if (idx >= (int)chapters.size()) break;
+        MenuRect r = chapter_row_rect(v);
+        if (tx >= r.x && tx <= r.x + r.w && ty >= r.y && ty <= r.y + r.h) {
+            if (idx == chapter_selected) {
+                chapters_select();
+            } else {
+                chapter_selected = idx;
+            }
+            return true;
+        }
+    }
+
+    // Tap outside the panel closes it.
+    if (tx < CH_MARGIN || tx > cw - CH_MARGIN || ty < CH_MARGIN || ty > ch - CH_MARGIN) {
+        showChapters = false;
+    }
+    return true;
 }
 
 bool BookReader::handle_touch_menu(int sx, int sy, bool *exitBook) {
@@ -422,6 +660,22 @@ bool BookReader::handle_touch_menu(int sx, int sy, bool *exitBook) {
     if (hit(touch_menu_button(MenuBtnStatusBar)))  { permStatusBar = !permStatusBar; return true; }
     if (hit(touch_menu_button(MenuBtnMarginDown))) { set_margin(page_margin - MARGIN_STEP); return true; }
     if (hit(touch_menu_button(MenuBtnMarginUp)))   { set_margin(page_margin + MARGIN_STEP); return true; }
+    if (hit(touch_menu_button(MenuBtnChapters)))   {
+        if (has_chapters()) {
+            // Open the chapter list; start it scrolled to the current chapter.
+            showChapters = true;
+            showTouchMenu = false;
+            int cur = layout->current_page();
+            chapter_selected = 0;
+            for (int i = 0; i < (int)chapters.size(); i++) {
+                if (chapters[i].page <= cur) chapter_selected = i;
+            }
+            int vis = chapter_rows_visible();
+            chapter_scroll = chapter_selected - vis / 2;
+            if (chapter_scroll < 0) chapter_scroll = 0;
+        }
+        return true;
+    }
     if (hit(touch_menu_button(MenuBtnExit)))       { showTouchMenu = false; if (exitBook) *exitBook = true; return true; }
 
     MenuRect p = touch_menu_panel();
@@ -523,7 +777,9 @@ void BookReader::draw(bool drawHelp) {
     }
     
     
-    if (showTouchMenu) {
+    if (showChapters) {
+        draw_chapter_menu();
+    } else if (showTouchMenu) {
         draw_touch_menu();
     }
 
