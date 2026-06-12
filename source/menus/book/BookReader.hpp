@@ -3,6 +3,7 @@
 
 #include <mupdf/pdf.h>
 #include <string>
+#include <vector>
 #include "PageLayout.hpp"
 #include <switch.h>
 struct SDL_Texture;
@@ -22,8 +23,12 @@ class BookReader {
         // Touch overlay menu (opened by tapping the centre of the screen).
         bool showTouchMenu = false;
 
+        // Chapter list overlay (opened from the touch menu's "Chapters" button).
+        bool showChapters = false;
+
         void previous_page(int n);
         void next_page(int n);
+        void goto_page(int page);           // jump to an absolute page number
         void zoom_in();
         void zoom_out();
         void move_page_up();
@@ -43,6 +48,17 @@ class BookReader {
         // page-turn / zoom touch handling for this tap). Sets `exitBook` to
         // true if the user pressed the menu's exit button.
         bool handle_touch_menu(int tx, int ty, bool *exitBook);
+
+        // Returns true if the chapter list is open and consumed this tap.
+        bool handle_chapter_menu(int tx, int ty);
+        // D-pad navigation within the chapter list.
+        void chapters_move(int delta);
+        void chapters_select();
+        int  chapter_page_step();   // rows to jump for L/R paging
+        bool has_chapters();
+
+        // One entry in the table of contents.
+        struct Chapter { std::string title; int page; };
     
         BookPageLayout currentPageLayout() {
             return _currentPageLayout;
@@ -71,6 +87,7 @@ class BookReader {
             MenuBtnStatusBar,
             MenuBtnMarginDown,
             MenuBtnMarginUp,
+            MenuBtnChapters,
             MenuBtnExit,
             MenuBtnCount
         };
@@ -85,6 +102,16 @@ class BookReader {
         // hit-testing and drawing always agree.
         void touch_menu_canvas(int *cw, int *ch);
         void touch_menu_map_point(int sx, int sy, int *lx, int *ly);
+
+        // ---- Chapter list overlay ----
+        // Built once from the document's outline (table of contents) at open.
+        std::vector<Chapter> chapters;
+        int  chapter_selected = 0;   // highlighted row
+        int  chapter_scroll   = 0;   // first visible row
+        void load_chapters();        // populate `chapters` from the outline
+        void draw_chapter_menu();
+        int  chapter_rows_visible(); // how many rows fit on screen
+        MenuRect chapter_row_rect(int visible_index); // logical rect of a row
     
         // Re-paginate a reflowable document so one page exactly fills the
         // screen in the given orientation, using the current font size.
