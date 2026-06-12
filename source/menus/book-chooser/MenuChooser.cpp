@@ -33,7 +33,7 @@ extern TTF_Font *ROBOTO_35, *ROBOTO_25, *ROBOTO_15;
 #define CARD_LABEL_H     45
 #define CARD_GAP_X       40
 #define CARD_GAP_Y       30
-#define GRID_TOP         30
+#define GRID_TOP         90   // leaves a header band for the Exit button
 #define GRID_LEFT        45
 
 struct BookEntry {
@@ -284,7 +284,8 @@ void Menu_StartChoosing() {
         }
 
         // ---- Touch input: select a card by tapping it; tap the already-
-        // selected card again to open it. ----
+        // selected card again to open it. Also a top-right "Exit" button. ----
+        bool exitApp = false;
         {
             HidTouchScreenState ts = {0};
             bool newTouch = false;
@@ -300,7 +301,16 @@ void Menu_StartChoosing() {
                 }
             }
 
-            if (newTouch && !isWarningOnScreen && amountOfFiles > 0) {
+            // Exit button rectangle (top-right corner, clear of the card grid).
+            const int EXIT_W = 110, EXIT_H = 50;
+            const int EXIT_X = 1280 - EXIT_W - 15;
+            const int EXIT_Y = 15;
+
+            if (newTouch && !isWarningOnScreen &&
+                tx >= EXIT_X && tx <= EXIT_X + EXIT_W &&
+                ty >= EXIT_Y && ty <= EXIT_Y + EXIT_H) {
+                exitApp = true;            // leave the chooser (and the app)
+            } else if (newTouch && !isWarningOnScreen && amountOfFiles > 0) {
                 for (int i = 0; i < amountOfFiles; i++) {
                     int row = i / CARD_COLS;
                     int col = i % CARD_COLS;
@@ -338,6 +348,8 @@ void Menu_StartChoosing() {
 
             if (readingBook) break;
         }
+
+        if (exitApp) break;  // touch Exit -> fall through to Term_Services()
 
         // ---- Fill in covers for on-screen cards ----
         // First, cheap disk-cache loads for any visible card we haven't checked
@@ -410,6 +422,19 @@ void Menu_StartChoosing() {
         if (amountOfFiles == 0) {
             SDL_DrawText(RENDERER, ROBOTO_25, GRID_LEFT, GRID_TOP, textColor,
                          "No books found in /switch/eBookReader/books");
+        }
+
+        // ---- Exit button (top-right, touch to quit the app) ----
+        {
+            const int EXIT_W = 110, EXIT_H = 50;
+            const int EXIT_X = 1280 - EXIT_W - 15;
+            const int EXIT_Y = 15;
+            SDL_DrawRect(RENDERER, EXIT_X, EXIT_Y, EXIT_W, EXIT_H, SDL_MakeColour(180, 60, 60, 255));
+            const char *label = "Exit";
+            int tw = 0, th = 0;
+            TTF_SizeText(ROBOTO_25, label, &tw, &th);
+            SDL_DrawText(RENDERER, ROBOTO_25, EXIT_X + (EXIT_W - tw) / 2, EXIT_Y + (EXIT_H - th) / 2,
+                         SDL_MakeColour(255, 255, 255, 255), label);
         }
 
         // ---- Warning modal ----
