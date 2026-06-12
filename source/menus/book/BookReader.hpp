@@ -65,6 +65,8 @@ class BookReader {
             MenuBtnRotate,
             MenuBtnResetView,
             MenuBtnStatusBar,
+            MenuBtnMarginDown,
+            MenuBtnMarginUp,
             MenuBtnExit,
             MenuBtnCount
         };
@@ -82,15 +84,19 @@ class BookReader {
     
         // Change text size of reflowable documents (re-paginates the book).
         void set_font_size(float size);
-    
+
+        // Change the page margin of reflowable documents (re-paginates).
+        void set_margin(int margin);
+
         int load_position();
         void save_position(int page);
-    
+
         fz_document *doc = NULL;
         int status_bar_visible_counter = 0;
-    
+
         bool reflowable = false;
         float font_size = 22;
+        int page_margin = 0;   // reflowable page inset, in pixels per side
     
         BookPageLayout _currentPageLayout = BookPageLayoutPortrait;
         PageLayout *layout = NULL;
